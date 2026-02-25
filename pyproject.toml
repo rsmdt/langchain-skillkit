@@ -1,0 +1,30 @@
+[project]
+name = "langchain-agent-skills"
+version = "0.1.0"
+description = "Frontmatter-driven agent nodes for LangGraph with progressive skill loading"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "langchain-core>=0.3",
+    "langgraph>=0.4",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "langchain-openai>=0.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/langchain_agent_skills"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
