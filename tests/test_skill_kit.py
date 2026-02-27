@@ -24,41 +24,49 @@ class TestSkillKitInit:
         assert len(kit.skills_dirs) == 2
 
 
-class TestGetTools:
+class TestTools:
     def test_returns_two_tools(self):
         kit = SkillKit(str(FIXTURES / "skills"))
 
-        tools = kit.get_tools()
+        tools = kit.tools
 
         assert len(tools) == 2
 
     def test_first_tool_is_skill(self):
         kit = SkillKit(str(FIXTURES / "skills"))
 
-        tools = kit.get_tools()
+        tools = kit.tools
 
         assert tools[0].name == "Skill"
 
     def test_second_tool_is_skill_read(self):
         kit = SkillKit(str(FIXTURES / "skills"))
 
-        tools = kit.get_tools()
+        tools = kit.tools
 
         assert tools[1].name == "SkillRead"
 
     def test_skill_description_lists_available_skills(self):
         kit = SkillKit(str(FIXTURES / "skills"))
 
-        tools = kit.get_tools()
+        tools = kit.tools
         skill_tool = tools[0]
 
         assert "market-sizing" in skill_tool.description
+
+    def test_tools_property_is_cached(self):
+        kit = SkillKit(str(FIXTURES / "skills"))
+
+        first = kit.tools
+        second = kit.tools
+
+        assert first is second
 
 
 class TestSkillTool:
     def test_loads_skill_instructions(self):
         kit = SkillKit(str(FIXTURES / "skills"))
-        skill_tool = kit.get_tools()[0]
+        skill_tool = kit.tools[0]
 
         result = skill_tool.invoke({"skill_name": "market-sizing"})
 
@@ -66,7 +74,7 @@ class TestSkillTool:
 
     def test_unknown_skill_returns_error(self):
         kit = SkillKit(str(FIXTURES / "skills"))
-        skill_tool = kit.get_tools()[0]
+        skill_tool = kit.tools[0]
 
         result = skill_tool.invoke({"skill_name": "nonexistent"})
 
@@ -74,7 +82,7 @@ class TestSkillTool:
 
     def test_invalid_skill_name_returns_error(self):
         kit = SkillKit(str(FIXTURES / "skills"))
-        skill_tool = kit.get_tools()[0]
+        skill_tool = kit.tools[0]
 
         result = skill_tool.invoke({"skill_name": "../escape"})
 
@@ -84,7 +92,7 @@ class TestSkillTool:
 class TestSkillReadTool:
     def test_reads_reference_file(self):
         kit = SkillKit(str(FIXTURES / "skills"))
-        skill_read_tool = kit.get_tools()[1]
+        skill_read_tool = kit.tools[1]
 
         result = skill_read_tool.invoke(
             {
@@ -98,7 +106,7 @@ class TestSkillReadTool:
 
     def test_unknown_file_returns_error(self):
         kit = SkillKit(str(FIXTURES / "skills"))
-        skill_read_tool = kit.get_tools()[1]
+        skill_read_tool = kit.tools[1]
 
         result = skill_read_tool.invoke(
             {
@@ -111,7 +119,7 @@ class TestSkillReadTool:
 
     def test_path_traversal_returns_error(self):
         kit = SkillKit(str(FIXTURES / "skills"))
-        skill_read_tool = kit.get_tools()[1]
+        skill_read_tool = kit.tools[1]
 
         result = skill_read_tool.invoke(
             {
@@ -132,7 +140,7 @@ class TestMultipleDirectories:
             ]
         )
 
-        tools = kit.get_tools()
+        tools = kit.tools
         skill_tool = tools[0]
 
         assert "market-sizing" in skill_tool.description
@@ -145,7 +153,7 @@ class TestMultipleDirectories:
                 str(FIXTURES / "skills_extra"),
             ]
         )
-        skill_tool = kit.get_tools()[0]
+        skill_tool = kit.tools[0]
 
         result = skill_tool.invoke({"skill_name": "competitive-analysis"})
 

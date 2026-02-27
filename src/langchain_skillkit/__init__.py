@@ -7,7 +7,7 @@ Two paths to use:
     from langchain_skillkit import SkillKit
 
     kit = SkillKit("skills/")
-    tools = [web_search] + kit.get_tools()
+    tools = [web_search] + kit.tools
 
 **Convenience** — use ``node`` metaclass to get a ReAct subgraph::
 

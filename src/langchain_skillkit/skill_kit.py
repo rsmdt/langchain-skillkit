@@ -11,7 +11,7 @@ Usage::
     kit = SkillKit(["skills/", "shared_skills/"])
 
     # Get tools for manual LangGraph wiring
-    tools = kit.get_tools()  # → [Skill, SkillRead]
+    tools = kit.tools  # → [Skill, SkillRead]
 
 The ``Skill`` tool returns skill instructions as a plain string.
 The ``SkillRead`` tool reads reference files scoped to a skill's directory.
@@ -22,11 +22,9 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
 
 from langchain_core.tools import (
     BaseTool,
-    BaseToolkit,
     StructuredTool,
     ToolException,
 )
@@ -52,11 +50,11 @@ class SkillReadInput(BaseModel):
     file_name: str = Field(description="Name of the reference file to read (e.g. 'calculator.py')")
 
 
-class SkillKit(BaseToolkit):
+class SkillKit:
     """Toolkit providing ``Skill`` and ``SkillRead`` tools.
 
     Scans one or more directories for skill subdirectories containing
-    ``SKILL.md`` files. Returns two tools via ``get_tools()``:
+    ``SKILL.md`` files. Provides two tools via the ``tools`` property:
 
     - **Skill**: Loads a skill's instructions. The tool description
       dynamically lists all available skills for semantic discovery.
@@ -67,10 +65,9 @@ class SkillKit(BaseToolkit):
         from langchain_skillkit import SkillKit
 
         kit = SkillKit("skills/")
-        skill_tools = kit.get_tools()  # [Skill, SkillRead]
 
         # Use in any LangGraph setup
-        all_tools = [web_search, calculate] + skill_tools
+        all_tools = [web_search, calculate] + kit.tools
         bound_llm = llm.bind_tools(all_tools)
 
     Args:
@@ -78,26 +75,25 @@ class SkillKit(BaseToolkit):
             containing skill subdirectories.
     """
 
-    skills_dirs: list[str]
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    def __init__(self, skills_dirs: str | list[str], **kwargs: Any) -> None:
+    def __init__(self, skills_dirs: str | list[str]) -> None:
         """Create a SkillKit from one or more skill directories.
 
         Args:
             skills_dirs: A single path or list of paths to directories
                 containing skill subdirectories with ``SKILL.md`` files.
         """
-        dirs = [skills_dirs] if isinstance(skills_dirs, str) else list(skills_dirs)
-        super().__init__(skills_dirs=dirs, **kwargs)  # type: ignore[call-arg]
+        self.skills_dirs = [skills_dirs] if isinstance(skills_dirs, str) else list(skills_dirs)
+        self._tools_cache: list[BaseTool] | None = None
 
-    def get_tools(self) -> list[BaseTool]:
-        """Return the toolkit's tools: Skill and SkillRead."""
-        return [
-            self._build_skill_tool(),
-            self._build_skill_read_tool(),
-        ]
+    @property
+    def tools(self) -> list[BaseTool]:
+        """The toolkit's tools: ``[Skill, SkillRead]``.
+
+        Built once on first access, then cached.
+        """
+        if self._tools_cache is None:
+            self._tools_cache = [self._build_skill_tool(), self._build_skill_read_tool()]
+        return self._tools_cache
 
     def _resolve_skills_dirs(self) -> list[Path]:
         return [Path(d).resolve() for d in self.skills_dirs if d]

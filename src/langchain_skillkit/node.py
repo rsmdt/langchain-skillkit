@@ -138,7 +138,7 @@ def _build_graph(
     # Build complete tool list
     skill_tools: list[BaseTool] = []
     if skill_kit is not None:
-        skill_tools = skill_kit.get_tools()
+        skill_tools = skill_kit.tools
 
     all_tools = list(user_tools) + skill_tools
     node_name = name

@@ -2,9 +2,20 @@
 
 Skill-driven agent toolkit for LangGraph with semantic skill discovery.
 
-Two paths to use: `SkillKit` as a standalone LangChain toolkit you wire yourself, or the `node` metaclass that gives you a complete ReAct subgraph with dependency injection.
+Two paths to use: `SkillKit` as a standalone toolkit you wire yourself, or the `node` metaclass that gives you a complete ReAct subgraph with dependency injection.
 
-## Install
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Skills](#skills)
+- [Examples](#examples)
+- [How It Works](#how-it-works)
+- [API Reference](#api-reference)
+- [Security](#security)
+- [Development](#development)
+
+## Installation
 
 ```bash
 pip install langchain-skillkit
@@ -14,7 +25,7 @@ pip install langchain-skillkit
 
 ## Quick Start
 
-### 1. Define a skill
+### 1. Create a skill
 
 Skills follow the [AgentSkills.io specification](https://agentskills.io/specification). Each lives in its own directory with a `SKILL.md`.
 
@@ -40,9 +51,7 @@ Cross-reference with unit economics and customer segments.
 - `calculator.py`: Python template for market calculations. Use `SkillRead` to view it.
 ```
 
-### 2. Use with the `node` metaclass (convenience)
-
-Declare a class — get a `CompiledStateGraph` with an automatic ReAct loop (handler <-> ToolNode):
+### 2. Build an agent
 
 ```python
 from langchain_core.tools import tool
@@ -64,7 +73,7 @@ class researcher(node):
         return {"messages": [response], "sender": "researcher"}
 ```
 
-`researcher` is a compiled graph — use it standalone or as a node in a larger graph:
+`researcher` is a `CompiledStateGraph` — use it standalone or as a node in a larger graph:
 
 ```python
 from langchain_core.messages import HumanMessage
@@ -83,63 +92,56 @@ workflow.add_edge("researcher", END)
 graph = workflow.compile()
 ```
 
-#### Handler signature
+## Skills
 
-```python
-async def handler(state, *, llm, tools, runtime): ...
+### Directory structure
+
+```
+skills/
+  market-sizing/
+    SKILL.md              # Required — instructions + frontmatter
+    calculator.py         # Optional — loaded via SkillRead
+  competitive-analysis/
+    SKILL.md
 ```
 
-`state` is positional. Everything after `*` is keyword-only and injected by name — declare only what you need, in any order:
+### SKILL.md format
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `state` | `dict` | LangGraph state (positional, required) |
-| `llm` | `BaseChatModel` | LLM pre-bound with all tools via `bind_tools()` |
-| `tools` | `list[BaseTool]` | All tools available to the agent |
-| `runtime` | `Any` | LangGraph runtime context (passed through from config) |
-
-#### Class attributes
-
-| Attribute | Required | Description |
-|-----------|----------|-------------|
-| `llm` | Yes | Language model instance |
-| `tools` | No | List of LangChain tools |
-| `skills` | No | Path(s) to skill directories, or a `SkillKit` instance |
-
-### 3. Use with `SkillKit` (manual wiring)
-
-Use `SkillKit` as a standard LangChain toolkit when you want full control over your graph:
-
-```python
-from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from langchain_skillkit import SkillKit
-
-@tool
-def web_search(query: str) -> str:
-    """Search the web for information."""
-    return f"Results for: {query}"
-
-llm = ChatOpenAI(model="gpt-4o")
-kit = SkillKit("skills/")
-
-# Combine your tools with skill tools
-all_tools = [web_search] + kit.get_tools()  # [web_search, Skill, SkillRead]
-bound_llm = llm.bind_tools(all_tools)
+```yaml
+---
+name: market-sizing                 # Must match directory name
+description: Calculate TAM/SAM/SOM  # Shown in Skill tool description
+---
+Instructions returned when the agent calls Skill("market-sizing").
 ```
 
-`SkillKit` accepts a single path or a list of paths:
+| Field | Required | Constraints |
+|-------|----------|-------------|
+| `name` | Yes | 1-64 chars, lowercase alphanumeric + hyphens, must match directory name |
+| `description` | Yes | Shown in the `Skill` tool description for semantic discovery |
 
-```python
-# Multiple skill directories
-kit = SkillKit(["skills/", "shared_skills/"])
+### Reference files
+
+Skills can include reference files (templates, scripts, examples) in their directory. The `SkillRead` tool lets the LLM read them on demand:
+
+```markdown
+**Reference Documents:**
+- `calculator.py`: Python template. Use `SkillRead` to view it.
 ```
+
+## Examples
+
+See [`examples/`](examples/) for complete working code:
+
+- **[`standalone_node.py`](examples/standalone_node.py)** — Simplest usage: declare a node class, invoke it
+- **[`manual_wiring.py`](examples/manual_wiring.py)** — Use `SkillKit` as a standalone toolkit with full graph control
+- **[`multi_agent.py`](examples/multi_agent.py)** — Compose multiple agents in a parent graph
 
 ## How It Works
 
 ### Semantic skill discovery
 
-The `Skill` tool's description dynamically lists all available skills from the skills directories:
+The `Skill` tool's description dynamically lists all available skills:
 
 ```xml
 <available_skills>
@@ -152,133 +154,109 @@ The `Skill` tool's description dynamically lists all available skills from the s
 
 The LLM discovers skills at runtime. If your prompt says "size the market" and a `market-sizing` skill exists, the LLM connects the dots and calls `Skill("market-sizing")` — returning the skill's instructions as a tool message.
 
-### Reference files
+### The `node` metaclass
 
-Skills can include reference files (templates, scripts, examples) in their directory. The `SkillRead` tool lets the LLM read them:
+When you declare `class researcher(node):`, the metaclass:
 
-```
-skills/
-  market-sizing/
-    SKILL.md
-    calculator.py       # Loaded via SkillRead
-  competitive-analysis/
-    SKILL.md
-```
+1. Extracts `llm`, `tools`, `skills`, and `handler` from the class body
+2. Validates the handler signature
+3. Builds a `StateGraph` with the handler node + `ToolNode` + conditional edges
+4. Returns a `CompiledStateGraph` (not a class)
 
-### Multi-agent routing
+Each node is a self-contained ReAct subgraph with its own tools.
 
-Use the `node` metaclass to create multiple agents and compose them:
-
-```python
-from langchain_skillkit import node, AgentState
-from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph, START, END
-
-class researcher(node):
-    llm = ChatOpenAI(model="gpt-4o")
-    tools = [web_search]
-    skills = "skills/"
-
-    async def handler(state, *, llm):
-        response = await llm.ainvoke(state["messages"])
-        return {"messages": [response], "sender": "researcher"}
-
-class analyst(node):
-    llm = ChatOpenAI(model="gpt-4o")
-    tools = [sql_query, calculate]
-    skills = "skills/"
-
-    async def handler(state, *, llm):
-        response = await llm.ainvoke(state["messages"])
-        return {"messages": [response], "sender": "analyst"}
-
-# Compose in a parent graph
-workflow = StateGraph(AgentState)
-workflow.add_node("researcher", researcher)
-workflow.add_node("analyst", analyst)
-workflow.add_edge(START, "researcher")
-workflow.add_edge("researcher", "analyst")
-workflow.add_edge("analyst", END)
-graph = workflow.compile()
-```
-
-Each `node` subclass is a self-contained subgraph with its own tools and ReAct loop.
-
-## File Formats
-
-### Skill (`SKILL.md`)
-
-```yaml
----
-name: market-sizing                 # Defaults to directory name if omitted.
-description: Calculate TAM/SAM/SOM  # Shown in Skill tool's available_skills list.
----
-Instructions returned to the agent when Skill("market-sizing") is called.
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | No | Skill identifier. Defaults to directory name. |
-| `description` | Yes | One-line summary shown in the `Skill` tool description. |
-
-## API
+## API Reference
 
 ### `SkillKit(skills_dirs)`
 
-LangChain toolkit that provides `Skill` and `SkillRead` tools.
+Toolkit that provides `Skill` and `SkillRead` tools.
 
 ```python
 from langchain_skillkit import SkillKit
 
 kit = SkillKit("skills/")
-tools = kit.get_tools()  # [Skill, SkillRead]
+all_tools = [web_search] + kit.tools  # [web_search, Skill, SkillRead]
 ```
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `skills_dirs` | `str \| list[str]` | Directory or list of directories containing skill subdirectories |
 
+| Property | Type | Description |
+|----------|------|-------------|
+| `tools` | `list[BaseTool]` | `[Skill, SkillRead]` — built once, cached |
+
 ### `node`
 
-Metaclass base. Subclassing produces a `CompiledStateGraph` with a ReAct loop.
+Metaclass base class. Subclassing produces a `CompiledStateGraph`.
 
 ```python
 from langchain_skillkit import node
 
 class my_agent(node):
-    llm = ChatOpenAI(model="gpt-4o")
-    tools = [web_search]
-    skills = "skills/"
+    llm = ChatOpenAI(model="gpt-4o")    # Required
+    tools = [web_search]                  # Optional
+    skills = "skills/"                    # Optional
 
     async def handler(state, *, llm):
         response = await llm.ainvoke(state["messages"])
         return {"messages": [response], "sender": "my_agent"}
 
-# my_agent is a CompiledStateGraph — not a class
 my_agent.invoke({"messages": [HumanMessage("...")]})
 ```
 
+#### Class attributes
+
+| Attribute | Required | Description |
+|-----------|----------|-------------|
+| `llm` | Yes | Language model instance |
+| `tools` | No | List of LangChain tools |
+| `skills` | No | Path(s) to skill directories, or a `SkillKit` instance |
+
+#### Handler signature
+
+```python
+async def handler(state, *, llm, tools, runtime): ...
+```
+
+`state` is positional. Everything after `*` is keyword-only and injected by name — declare only what you need:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `state` | `dict` | LangGraph state (positional, required) |
+| `llm` | `BaseChatModel` | LLM pre-bound with all tools via `bind_tools()` |
+| `tools` | `list[BaseTool]` | All tools available to the agent |
+| `runtime` | `Any` | LangGraph runtime context (passed through from config) |
+
 ### `AgentState`
 
-Minimal LangGraph state. Extend with your own fields:
+Minimal LangGraph state type used internally by the `node` metaclass. Import it when composing nodes in a parent graph so your state is compatible:
 
 ```python
 from langchain_skillkit import AgentState
+from langgraph.graph import StateGraph
 
+workflow = StateGraph(AgentState)
+workflow.add_node("researcher", researcher)
+```
+
+Extend it with your own fields:
+
+```python
 class MyState(AgentState):
     current_project: str
     iteration_count: int
 ```
 
-| Field | Description |
-|-------|-------------|
-| `messages` | Conversation history with `add_messages` reducer |
-| `sender` | Name of the last node that produced output |
+| Field | Type | Description |
+|-------|------|-------------|
+| `messages` | `Annotated[list, add_messages]` | Conversation history with LangGraph message reducer |
+| `sender` | `str` | Name of the last node that produced output |
 
 ## Security
 
 - **Path traversal prevention**: File paths resolved to absolute and checked against skill directories.
-- **Name validation**: Skill names match `^[a-z][a-z0-9_-]{0,63}$`. File names match `^[a-zA-Z0-9_.-]{1,255}$`.
+- **Name validation**: Skill names validated per [AgentSkills.io spec](https://agentskills.io/specification) — lowercase alphanumeric + hyphens, 1-64 chars, must match directory name.
 - **Tool scoping**: Each `node` subclass only has access to the tools declared in its `tools` attribute.
 
 ## Development
