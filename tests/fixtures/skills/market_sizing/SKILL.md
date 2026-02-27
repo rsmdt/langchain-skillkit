@@ -1,9 +1,6 @@
 ---
 name: market-sizing
 description: Calculate TAM, SAM, and SOM for market analysis
-allowed-tools:
-  - web_search
-  - calculate
 ---
 # Market Sizing Methodology
 
@@ -17,4 +14,4 @@ Use industry reports and macro data to estimate TAM.
 Cross-reference with unit economics and customer segments.
 
 **Reference Documents:**
-- `calculator.py`: Python template for market calculations. Use `read_reference` to view it.
+- `calculator.py`: Python template for market calculations. Use `SkillRead` to view it.

@@ -1,63 +1,34 @@
-"""Tests for node configuration validation."""
+"""Tests for skill config validation."""
 
-from pathlib import Path
-
-from langchain_core.tools import StructuredTool
-
-from langchain_agent_skills.registry import ToolRegistry
-from langchain_agent_skills.types import NodeConfig
-from langchain_agent_skills.validate import validate_node_config
-
-FIXTURES = Path(__file__).parent / "fixtures"
+from langchain_skillkit.types import SkillConfig
+from langchain_skillkit.validate import validate_skill_config
 
 
-def _make_tool(name: str) -> StructuredTool:
-    return StructuredTool.from_function(
-        func=lambda: "ok",
-        name=name,
-        description=f"A mock {name} tool",
-    )
+class TestValidateSkillConfig:
+    def test_valid_config_returns_no_errors(self):
+        config = SkillConfig(name="market-sizing", description="Size markets")
 
-
-class TestValidateNodeConfig:
-    def test_valid_researcher_config(self):
-        registry = ToolRegistry()
-        registry.register(_make_tool("web_search"), _make_tool("calculate"))
-        config = NodeConfig.from_file(FIXTURES / "prompts/nodes/researcher.md")
-
-        errors = validate_node_config(config, registry, FIXTURES / "skills")
+        errors = validate_skill_config(config)
 
         assert errors == []
 
-    def test_valid_analyst_config(self):
-        registry = ToolRegistry()
-        registry.register(
-            _make_tool("sql_query"),
-            _make_tool("calculate"),
-            _make_tool("web_search"),
-        )
-        config = NodeConfig.from_file(FIXTURES / "prompts/nodes/analyst.md")
+    def test_missing_name_returns_error(self):
+        config = SkillConfig(name="", description="Some description")
 
-        errors = validate_node_config(
-            config, registry, FIXTURES / "skills"
-        )
+        errors = validate_skill_config(config)
 
-        # stakeholder_mapping skill doesn't exist in fixtures
-        assert any("missing skill" in e for e in errors)
+        assert any("name" in e for e in errors)
 
-    def test_reports_unknown_allowed_tool(self):
-        registry = ToolRegistry()
-        config = NodeConfig.from_file(FIXTURES / "prompts/nodes/analyst.md")
+    def test_missing_description_returns_error(self):
+        config = SkillConfig(name="test-skill", description="")
 
-        errors = validate_node_config(config, registry, FIXTURES / "skills")
+        errors = validate_skill_config(config)
 
-        assert any("sql_query" in e for e in errors)
+        assert any("description" in e for e in errors)
 
-    def test_reports_unknown_skill_tool(self):
-        registry = ToolRegistry()
-        # Register no tools — skill's allowed-tools will fail
-        config = NodeConfig.from_file(FIXTURES / "prompts/nodes/researcher.md")
+    def test_missing_both_returns_two_errors(self):
+        config = SkillConfig(name="", description="")
 
-        errors = validate_node_config(config, registry, FIXTURES / "skills")
+        errors = validate_skill_config(config)
 
-        assert any("web_search" in e for e in errors)
+        assert len(errors) == 2

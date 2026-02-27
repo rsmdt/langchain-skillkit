@@ -1,0 +1,289 @@
+"""Metaclass-driven LangGraph node with skill support.
+
+Usage::
+
+    from langchain_skillkit import node
+
+    class researcher(node):
+        llm = ChatOpenAI(model="gpt-4o")
+        tools = [web_search, calculate]
+        skills = "skills/"
+
+        async def handler(state, *, llm, tools, runtime):
+            response = await llm.ainvoke(state["messages"])
+            return {"messages": [response], "sender": "researcher"}
+
+``researcher`` is a ``CompiledStateGraph`` — use it standalone or as
+a node in a larger graph.
+"""
+
+from __future__ import annotations
+
+import inspect
+from pathlib import Path
+from typing import Any
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.tools import BaseTool
+from langgraph.graph import END, StateGraph
+from langgraph.prebuilt import ToolNode
+
+from langchain_skillkit.skill_kit import SkillKit
+from langchain_skillkit.state import AgentState
+
+# Valid injectable parameter names for handler (besides 'state')
+_INJECTABLE_PARAMS = frozenset({"llm", "tools", "runtime"})
+
+
+def _validate_handler_signature(handler: Any, class_name: str) -> set[str]:
+    """Validate and extract injectable parameter names from handler.
+
+    Returns the set of keyword-only parameter names that need injection.
+
+    Raises:
+        ValueError: If handler has invalid parameters.
+    """
+    sig = inspect.signature(handler)
+    params = list(sig.parameters.values())
+
+    if not params:
+        raise ValueError(
+            f"class {class_name}(node): handler must accept at least "
+            f"'state' as its first parameter"
+        )
+
+    # First param must be 'state' (positional)
+    first = params[0]
+    if first.kind not in (
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    ):
+        raise ValueError(
+            f"class {class_name}(node): handler's first parameter must be "
+            f"positional ('state'), got {first.kind.name}"
+        )
+
+    # Collect keyword-only params (after *)
+    injectable = set()
+    for param in params[1:]:
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            continue
+        if param.kind == inspect.Parameter.KEYWORD_ONLY:
+            if param.name not in _INJECTABLE_PARAMS:
+                raise ValueError(
+                    f"class {class_name}(node): unknown handler parameter "
+                    f"'{param.name}'. Valid parameters: state, "
+                    f"{', '.join(sorted(_INJECTABLE_PARAMS))}"
+                )
+            injectable.add(param.name)
+        elif param.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            raise ValueError(
+                f"class {class_name}(node): handler parameter '{param.name}' "
+                f"must be keyword-only (after *). "
+                f"Signature should be: handler(state, *, {param.name}, ...)"
+            )
+
+    return injectable
+
+
+def _normalize_skills(
+    skills: str | list[str] | SkillKit | None,
+) -> SkillKit | None:
+    """Normalize the skills parameter into a SkillKit instance or None."""
+    if skills is None:
+        return None
+    if isinstance(skills, SkillKit):
+        return skills
+    if isinstance(skills, str):
+        return SkillKit(skills)
+    if isinstance(skills, list):
+        return SkillKit(skills)
+    raise TypeError(
+        f"skills must be str, list[str], SkillKit, or None, "
+        f"got {type(skills).__name__}"
+    )
+
+
+def _build_graph(
+    name: str,
+    handler: Any,
+    llm: BaseChatModel,
+    user_tools: list[BaseTool],
+    skill_kit: SkillKit | None,
+    injectable: set[str],
+) -> Any:
+    """Build and compile the ReAct subgraph.
+
+    Returns a CompiledStateGraph.
+    """
+    # Build complete tool list
+    skill_tools: list[BaseTool] = []
+    if skill_kit is not None:
+        skill_tools = skill_kit.get_tools()
+
+    all_tools = list(user_tools) + skill_tools
+    node_name = name
+
+    # Build the handler wrapper as a LangGraph node
+    async def _agent_node(state: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        # Pre-bind LLM with all tools
+        if all_tools:
+            bound_llm = llm.bind_tools(all_tools)
+        else:
+            bound_llm = llm
+
+        # Inject only the kwargs the handler requested
+        inject: dict[str, Any] = {}
+        if "llm" in injectable:
+            inject["llm"] = bound_llm
+        if "tools" in injectable:
+            inject["tools"] = list(all_tools)
+        if "runtime" in injectable:
+            inject["runtime"] = kwargs.get("runtime")
+
+        result = handler(state, **inject)
+        if inspect.isawaitable(result):
+            result = await result
+
+        return result
+
+    _agent_node.__name__ = node_name
+    _agent_node.__qualname__ = f"node.<locals>.{node_name}"
+
+    # Build the graph
+    workflow = StateGraph(AgentState)
+    workflow.add_node(node_name, _agent_node)
+
+    if all_tools:
+        tool_node = ToolNode(all_tools)
+        workflow.add_node("tools", tool_node)
+
+        def _should_continue(state: dict[str, Any]) -> str:
+            last = state["messages"][-1]
+            if hasattr(last, "tool_calls") and last.tool_calls:
+                return "tools"
+            return END
+
+        workflow.set_entry_point(node_name)
+        workflow.add_conditional_edges(
+            node_name,
+            _should_continue,
+            {"tools": "tools", END: END},
+        )
+        workflow.add_edge("tools", node_name)
+    else:
+        workflow.set_entry_point(node_name)
+        workflow.add_edge(node_name, END)
+
+    return workflow.compile()
+
+
+class _NodeMeta(type):
+    """Metaclass that intercepts class body and returns a CompiledStateGraph.
+
+    When a class inherits from ``node``, this metaclass:
+
+    1. Extracts ``llm``, ``tools``, ``skills``, ``handler`` from the class body.
+    2. Validates the handler signature.
+    3. Builds and returns a ``CompiledStateGraph`` with the ReAct loop.
+
+    The result is NOT a class — it's a compiled graph, usable as a
+    standalone graph or as a node in a parent LangGraph graph.
+    """
+
+    def __new__(
+        mcs,
+        name: str,
+        bases: tuple[type, ...],
+        namespace: dict[str, Any],
+    ) -> Any:
+        # The `node` base class itself — create normally
+        if not bases:
+            return super().__new__(mcs, name, bases, namespace)
+
+        # Subclass of node → intercept and return CompiledStateGraph
+
+        # Extract handler (required)
+        handler = namespace.get("handler")
+        if handler is None:
+            raise ValueError(
+                f"class {name}(node) must define an async def handler(...) function"
+            )
+        if not callable(handler):
+            raise ValueError(
+                f"class {name}(node): handler must be callable, "
+                f"got {type(handler).__name__}"
+            )
+
+        # Validate handler signature
+        injectable = _validate_handler_signature(handler, name)
+
+        # Extract class attributes
+        llm = namespace.get("llm")
+        if llm is None:
+            raise ValueError(
+                f"class {name}(node) must define an llm attribute "
+                f"(e.g. llm = ChatOpenAI(model='gpt-4o'))"
+            )
+
+        user_tools = namespace.get("tools", [])
+        if not isinstance(user_tools, (list, tuple)):
+            raise ValueError(
+                f"class {name}(node): tools must be a list, "
+                f"got {type(user_tools).__name__}"
+            )
+
+        skills_raw = namespace.get("skills")
+        skill_kit = _normalize_skills(skills_raw)
+
+        return _build_graph(
+            name=name,
+            handler=handler,
+            llm=llm,
+            user_tools=list(user_tools),
+            skill_kit=skill_kit,
+            injectable=injectable,
+        )
+
+
+class node(metaclass=_NodeMeta):
+    """Base class for skill-aware LangGraph agent nodes.
+
+    Declare a subclass to create a ``CompiledStateGraph`` with an
+    automatic ReAct loop (handler ⇄ ToolNode).
+
+    Example::
+
+        from langchain_skillkit import node
+
+        class researcher(node):
+            llm = ChatOpenAI(model="gpt-4o")
+            tools = [web_search, calculate]
+            skills = "skills/"
+
+            async def handler(state, *, llm, tools, runtime):
+                response = await llm.ainvoke(state["messages"])
+                return {"messages": [response], "sender": "researcher"}
+
+        # Use standalone
+        researcher.invoke({"messages": [HumanMessage("...")]})
+
+        # Use as node in a larger graph
+        workflow.add_node("researcher", researcher)
+
+    Class attributes:
+
+        llm: Required. The language model instance.
+        tools: Optional. List of LangChain tools available to the agent.
+        skills: Optional. Path(s) to skill directories or a SkillKit instance.
+
+    Handler signature::
+
+        async def handler(state, *, llm, tools, runtime): ...
+
+    ``state`` is positional. Everything after ``*`` is keyword-only and
+    injected by name — declare only what you need, in any order.
+    """

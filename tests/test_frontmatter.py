@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from langchain_agent_skills.frontmatter import parse_frontmatter
+from langchain_skillkit.frontmatter import parse_frontmatter
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -16,15 +16,15 @@ class TestParseFrontmatter:
         assert result.metadata["name"] == "researcher"
         assert result.metadata["description"] == "Research specialist that gathers factual information"
 
-    def test_parses_skills_list(self):
-        result = parse_frontmatter(FIXTURES / "prompts/nodes/researcher.md")
-
-        assert result.metadata["skills"] == ["market_sizing"]
-
-    def test_parses_allowed_tools(self):
+    def test_parses_allowed_tools_as_comma_separated(self):
         result = parse_frontmatter(FIXTURES / "prompts/nodes/analyst.md")
 
-        assert result.metadata["allowed-tools"] == ["sql_query", "calculate"]
+        assert result.metadata["allowed-tools"] == "sql_query, calculate"
+
+    def test_researcher_has_no_allowed_tools(self):
+        result = parse_frontmatter(FIXTURES / "prompts/nodes/researcher.md")
+
+        assert "allowed-tools" not in result.metadata
 
     def test_extracts_body_as_content(self):
         result = parse_frontmatter(FIXTURES / "prompts/nodes/researcher.md")
@@ -36,6 +36,12 @@ class TestParseFrontmatter:
 
         assert "---" not in result.content
         assert "name:" not in result.content
+
+    def test_body_contains_skill_references_in_prose(self):
+        result = parse_frontmatter(FIXTURES / "prompts/nodes/researcher.md")
+
+        assert 'Skill("market-sizing")' in result.content
+        assert "competitive-analysis skill" in result.content
 
     def test_returns_empty_metadata_when_no_frontmatter(self, tmp_path):
         md_file = tmp_path / "plain.md"
@@ -55,5 +61,4 @@ class TestParseFrontmatter:
 
         assert result.metadata["name"] == "market-sizing"
         assert result.metadata["description"] == "Calculate TAM, SAM, and SOM for market analysis"
-        assert result.metadata["allowed-tools"] == ["web_search", "calculate"]
         assert "# Market Sizing Methodology" in result.content

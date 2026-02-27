@@ -1,0 +1,9 @@
+---
+name: competitive-analysis
+description: Evaluate competitor landscapes and market positioning
+---
+# Competitive Analysis
+
+Step 1: Identify direct competitors...
+Step 2: Compare feature sets...
+Step 3: Assess market positioning...
