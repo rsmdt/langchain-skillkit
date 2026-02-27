@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from langchain_core.tools import (
     BaseTool,
@@ -40,20 +41,14 @@ REFERENCE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,255}$")
 class SkillInput(BaseModel):
     """Input schema for the Skill tool."""
 
-    skill_name: str = Field(
-        description="Name of the skill to load (e.g. 'market-sizing')"
-    )
+    skill_name: str = Field(description="Name of the skill to load (e.g. 'market-sizing')")
 
 
 class SkillReadInput(BaseModel):
     """Input schema for the SkillRead tool."""
 
-    skill_name: str = Field(
-        description="Name of the skill containing the reference file"
-    )
-    file_name: str = Field(
-        description="Name of the reference file to read (e.g. 'calculator.py')"
-    )
+    skill_name: str = Field(description="Name of the skill containing the reference file")
+    file_name: str = Field(description="Name of the reference file to read (e.g. 'calculator.py')")
 
 
 class SkillKit(BaseToolkit):
@@ -86,18 +81,15 @@ class SkillKit(BaseToolkit):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    def __init__(self, skills_dirs: str | list[str], **kwargs):
+    def __init__(self, skills_dirs: str | list[str], **kwargs: Any) -> None:
         """Create a SkillKit from one or more skill directories.
 
         Args:
             skills_dirs: A single path or list of paths to directories
                 containing skill subdirectories with ``SKILL.md`` files.
         """
-        if isinstance(skills_dirs, str):
-            dirs = [skills_dirs]
-        else:
-            dirs = list(skills_dirs)
-        super().__init__(skills_dirs=dirs, **kwargs)
+        dirs = [skills_dirs] if isinstance(skills_dirs, str) else list(skills_dirs)
+        super().__init__(skills_dirs=dirs, **kwargs)  # type: ignore[call-arg]
 
     def get_tools(self) -> list[BaseTool]:
         """Return the toolkit's tools: Skill and SkillRead."""
@@ -164,11 +156,7 @@ class SkillKit(BaseToolkit):
                 f"</skill>"
             )
 
-        return (
-            "\n\n<available_skills>\n"
-            + "\n".join(entries)
-            + "\n</available_skills>"
-        )
+        return "\n\n<available_skills>\n" + "\n".join(entries) + "\n</available_skills>"
 
     def _build_skill_tool(self) -> StructuredTool:
         base_description = (
@@ -229,8 +217,7 @@ class SkillKit(BaseToolkit):
             func=skill_read,
             name="SkillRead",
             description=(
-                "Read a reference file (template, example, script) "
-                "from within a skill directory."
+                "Read a reference file (template, example, script) from within a skill directory."
             ),
             args_schema=SkillReadInput,
             handle_tool_error=True,

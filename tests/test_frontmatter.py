@@ -14,7 +14,9 @@ class TestParseFrontmatter:
         result = parse_frontmatter(FIXTURES / "prompts/nodes/researcher.md")
 
         assert result.metadata["name"] == "researcher"
-        assert result.metadata["description"] == "Research specialist that gathers factual information"
+        assert result.metadata["description"] == (
+            "Research specialist that gathers factual information"
+        )
 
     def test_parses_allowed_tools_as_comma_separated(self):
         result = parse_frontmatter(FIXTURES / "prompts/nodes/analyst.md")

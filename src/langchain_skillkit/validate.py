@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from langchain_skillkit.types import SkillConfig
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from langchain_skillkit.types import SkillConfig
 
 
 def validate_skill_config(config: SkillConfig) -> list[str]:
@@ -16,8 +19,6 @@ def validate_skill_config(config: SkillConfig) -> list[str]:
         errors.append("Skill is missing required field 'name'")
 
     if not config.description:
-        errors.append(
-            f"Skill '{config.name}' is missing required field 'description'"
-        )
+        errors.append(f"Skill '{config.name}' is missing required field 'description'")
 
     return errors

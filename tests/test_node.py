@@ -1,7 +1,8 @@
+# ruff: noqa: N801, N805
 """Tests for the node metaclass."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -190,8 +191,10 @@ class TestNodeInvocation:
                     "sender": "simple",
                 }
 
-        result = await simple.ainvoke({
-            "messages": [HumanMessage(content="hi")],
-        })
+        result = await simple.ainvoke(
+            {
+                "messages": [HumanMessage(content="hi")],
+            }
+        )
 
         assert result["messages"][-1].content == "done"

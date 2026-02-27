@@ -37,9 +37,7 @@ class SkillConfig:
         metadata = result.metadata
 
         ref_files = [
-            f.name
-            for f in Path(skill_dir).iterdir()
-            if f.is_file() and f.name != "SKILL.md"
+            f.name for f in Path(skill_dir).iterdir() if f.is_file() and f.name != "SKILL.md"
         ]
 
         return cls(

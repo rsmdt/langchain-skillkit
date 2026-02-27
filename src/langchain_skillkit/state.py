@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from langgraph.graph.message import add_messages
 
@@ -20,5 +20,5 @@ class AgentState(TypedDict, total=False):
         sender: Name of the last node that called tools (for routing back).
     """
 
-    messages: Annotated[list, add_messages]
+    messages: Annotated[list[Any], add_messages]
     sender: str

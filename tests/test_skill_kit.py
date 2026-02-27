@@ -2,9 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-from langchain_core.tools import ToolException
-
 from langchain_skillkit.skill_kit import SkillKit
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -17,10 +14,12 @@ class TestSkillKitInit:
         assert len(kit.skills_dirs) == 1
 
     def test_accepts_list_of_paths(self):
-        kit = SkillKit([
-            str(FIXTURES / "skills"),
-            str(FIXTURES / "skills_extra"),
-        ])
+        kit = SkillKit(
+            [
+                str(FIXTURES / "skills"),
+                str(FIXTURES / "skills_extra"),
+            ]
+        )
 
         assert len(kit.skills_dirs) == 2
 
@@ -87,10 +86,12 @@ class TestSkillReadTool:
         kit = SkillKit(str(FIXTURES / "skills"))
         skill_read_tool = kit.get_tools()[1]
 
-        result = skill_read_tool.invoke({
-            "skill_name": "market-sizing",
-            "file_name": "calculator.py",
-        })
+        result = skill_read_tool.invoke(
+            {
+                "skill_name": "market-sizing",
+                "file_name": "calculator.py",
+            }
+        )
 
         assert isinstance(result, str)
         assert len(result) > 0
@@ -99,10 +100,12 @@ class TestSkillReadTool:
         kit = SkillKit(str(FIXTURES / "skills"))
         skill_read_tool = kit.get_tools()[1]
 
-        result = skill_read_tool.invoke({
-            "skill_name": "market-sizing",
-            "file_name": "nonexistent.py",
-        })
+        result = skill_read_tool.invoke(
+            {
+                "skill_name": "market-sizing",
+                "file_name": "nonexistent.py",
+            }
+        )
 
         assert "not found" in result
 
@@ -110,20 +113,24 @@ class TestSkillReadTool:
         kit = SkillKit(str(FIXTURES / "skills"))
         skill_read_tool = kit.get_tools()[1]
 
-        result = skill_read_tool.invoke({
-            "skill_name": "market-sizing",
-            "file_name": "../../etc/passwd",
-        })
+        result = skill_read_tool.invoke(
+            {
+                "skill_name": "market-sizing",
+                "file_name": "../../etc/passwd",
+            }
+        )
 
         assert "Invalid file name" in result
 
 
 class TestMultipleDirectories:
     def test_discovers_skills_from_both_directories(self):
-        kit = SkillKit([
-            str(FIXTURES / "skills"),
-            str(FIXTURES / "skills_extra"),
-        ])
+        kit = SkillKit(
+            [
+                str(FIXTURES / "skills"),
+                str(FIXTURES / "skills_extra"),
+            ]
+        )
 
         tools = kit.get_tools()
         skill_tool = tools[0]
@@ -132,10 +139,12 @@ class TestMultipleDirectories:
         assert "competitive-analysis" in skill_tool.description
 
     def test_loads_skill_from_extra_directory(self):
-        kit = SkillKit([
-            str(FIXTURES / "skills"),
-            str(FIXTURES / "skills_extra"),
-        ])
+        kit = SkillKit(
+            [
+                str(FIXTURES / "skills"),
+                str(FIXTURES / "skills_extra"),
+            ]
+        )
         skill_tool = kit.get_tools()[0]
 
         result = skill_tool.invoke({"skill_name": "competitive-analysis"})

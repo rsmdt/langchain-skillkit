@@ -20,16 +20,17 @@ a node in a larger graph.
 from __future__ import annotations
 
 import inspect
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.tools import BaseTool
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from langchain_skillkit.skill_kit import SkillKit
 from langchain_skillkit.state import AgentState
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.tools import BaseTool
 
 # Valid injectable parameter names for handler (besides 'state')
 _INJECTABLE_PARAMS = frozenset({"llm", "tools", "runtime"})
@@ -48,8 +49,7 @@ def _validate_handler_signature(handler: Any, class_name: str) -> set[str]:
 
     if not params:
         raise ValueError(
-            f"class {class_name}(node): handler must accept at least "
-            f"'state' as its first parameter"
+            f"class {class_name}(node): handler must accept at least 'state' as its first parameter"
         )
 
     # First param must be 'state' (positional)
@@ -102,9 +102,25 @@ def _normalize_skills(
     if isinstance(skills, list):
         return SkillKit(skills)
     raise TypeError(
-        f"skills must be str, list[str], SkillKit, or None, "
-        f"got {type(skills).__name__}"
+        f"skills must be str, list[str], SkillKit, or None, got {type(skills).__name__}"
     )
+
+
+def _build_inject(
+    injectable: set[str],
+    bound_llm: Any,
+    all_tools: list[Any],
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the injection dict for the handler based on requested params."""
+    inject: dict[str, Any] = {}
+    if "llm" in injectable:
+        inject["llm"] = bound_llm
+    if "tools" in injectable:
+        inject["tools"] = list(all_tools)
+    if "runtime" in injectable:
+        inject["runtime"] = kwargs.get("runtime")
+    return inject
 
 
 def _build_graph(
@@ -129,33 +145,21 @@ def _build_graph(
 
     # Build the handler wrapper as a LangGraph node
     async def _agent_node(state: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        # Pre-bind LLM with all tools
-        if all_tools:
-            bound_llm = llm.bind_tools(all_tools)
-        else:
-            bound_llm = llm
-
-        # Inject only the kwargs the handler requested
-        inject: dict[str, Any] = {}
-        if "llm" in injectable:
-            inject["llm"] = bound_llm
-        if "tools" in injectable:
-            inject["tools"] = list(all_tools)
-        if "runtime" in injectable:
-            inject["runtime"] = kwargs.get("runtime")
+        bound_llm = llm.bind_tools(all_tools) if all_tools else llm
+        inject = _build_inject(injectable, bound_llm, all_tools, kwargs)
 
         result = handler(state, **inject)
         if inspect.isawaitable(result):
             result = await result
 
-        return result
+        return result  # type: ignore[no-any-return]
 
     _agent_node.__name__ = node_name
     _agent_node.__qualname__ = f"node.<locals>.{node_name}"
 
     # Build the graph
-    workflow = StateGraph(AgentState)
-    workflow.add_node(node_name, _agent_node)
+    workflow: StateGraph[Any] = StateGraph(AgentState)
+    workflow.add_node(node_name, _agent_node)  # type: ignore[type-var]
 
     if all_tools:
         tool_node = ToolNode(all_tools)
@@ -209,13 +213,10 @@ class _NodeMeta(type):
         # Extract handler (required)
         handler = namespace.get("handler")
         if handler is None:
-            raise ValueError(
-                f"class {name}(node) must define an async def handler(...) function"
-            )
+            raise ValueError(f"class {name}(node) must define an async def handler(...) function")
         if not callable(handler):
             raise ValueError(
-                f"class {name}(node): handler must be callable, "
-                f"got {type(handler).__name__}"
+                f"class {name}(node): handler must be callable, got {type(handler).__name__}"
             )
 
         # Validate handler signature
@@ -232,8 +233,7 @@ class _NodeMeta(type):
         user_tools = namespace.get("tools", [])
         if not isinstance(user_tools, (list, tuple)):
             raise ValueError(
-                f"class {name}(node): tools must be a list, "
-                f"got {type(user_tools).__name__}"
+                f"class {name}(node): tools must be a list, got {type(user_tools).__name__}"
             )
 
         skills_raw = namespace.get("skills")
@@ -249,7 +249,7 @@ class _NodeMeta(type):
         )
 
 
-class node(metaclass=_NodeMeta):
+class node(metaclass=_NodeMeta):  # noqa: N801
     """Base class for skill-aware LangGraph agent nodes.
 
     Declare a subclass to create a ``CompiledStateGraph`` with an

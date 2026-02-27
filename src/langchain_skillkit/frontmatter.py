@@ -10,7 +10,7 @@ import yaml
 class FrontmatterResult:
     """Parsed frontmatter metadata and markdown body content."""
 
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, str] = field(default_factory=dict)
     content: str = ""
 
 
