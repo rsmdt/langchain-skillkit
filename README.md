@@ -16,7 +16,7 @@ pip install langchain-skillkit
 
 ### 1. Define a skill
 
-Skills follow the [AgentSkills.io specification](https://agentskills.io/specification). Each lives in its own directory with a `SKILL.md`.
+Each skill lives in its own directory with a `SKILL.md`.
 
 `skills/market_sizing/SKILL.md`
 
