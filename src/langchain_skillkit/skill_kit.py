@@ -34,7 +34,8 @@ from pydantic import BaseModel, Field
 
 from langchain_skillkit.types import SkillConfig
 
-SKILL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+# AgentSkills.io: 1-64 chars, lowercase + digits + hyphens, no leading/trailing/consecutive hyphens
+SKILL_NAME_PATTERN = re.compile(r"^[a-z](?:[a-z0-9]|-(?!-)){0,62}[a-z0-9]$|^[a-z]$")
 REFERENCE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,255}$")
 
 

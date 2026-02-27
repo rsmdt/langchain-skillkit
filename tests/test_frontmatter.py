@@ -59,7 +59,7 @@ class TestParseFrontmatter:
             parse_frontmatter(tmp_path / "nonexistent.md")
 
     def test_parses_skill_frontmatter(self):
-        result = parse_frontmatter(FIXTURES / "skills/market_sizing/SKILL.md")
+        result = parse_frontmatter(FIXTURES / "skills/market-sizing/SKILL.md")
 
         assert result.metadata["name"] == "market-sizing"
         assert result.metadata["description"] == "Calculate TAM, SAM, and SOM for market analysis"

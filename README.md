@@ -16,9 +16,9 @@ pip install langchain-skillkit
 
 ### 1. Define a skill
 
-Each skill lives in its own directory with a `SKILL.md`.
+Skills follow the [AgentSkills.io specification](https://agentskills.io/specification). Each lives in its own directory with a `SKILL.md`.
 
-`skills/market_sizing/SKILL.md`
+`skills/market-sizing/SKILL.md`
 
 ```markdown
 ---
@@ -158,10 +158,10 @@ Skills can include reference files (templates, scripts, examples) in their direc
 
 ```
 skills/
-  market_sizing/
+  market-sizing/
     SKILL.md
     calculator.py       # Loaded via SkillRead
-  competitive_analysis/
+  competitive-analysis/
     SKILL.md
 ```
 
