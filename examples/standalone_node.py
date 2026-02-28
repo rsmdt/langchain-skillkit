@@ -1,7 +1,8 @@
+# ruff: noqa: N801, N805
 """Standalone node — the simplest way to use langchain-skillkit.
 
 Declare a class with the node metaclass and get a complete ReAct agent
-with skill support. The result is a CompiledStateGraph you can invoke directly.
+with skill support. The result is a StateGraph — call .compile() to run it.
 """
 
 from langchain_core.messages import HumanMessage
@@ -27,9 +28,10 @@ class researcher(node):
         return {"messages": [response], "sender": "researcher"}
 
 
-# researcher is a CompiledStateGraph — invoke it directly
+# researcher is a StateGraph — compile and invoke
 if __name__ == "__main__":
-    result = researcher.invoke(
+    graph = researcher.compile()
+    result = graph.invoke(
         {"messages": [HumanMessage("Size the B2B SaaS market in Europe")]}
     )
     print(result["messages"][-1].content)

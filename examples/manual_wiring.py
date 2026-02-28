@@ -4,7 +4,7 @@ Use this approach when you want full control over your LangGraph graph
 and just need the Skill + SkillRead tools added to your tool list.
 """
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph

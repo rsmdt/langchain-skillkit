@@ -22,7 +22,8 @@ Two paths to use:
             response = await llm.ainvoke(state["messages"])
             return {"messages": [response], "sender": "researcher"}
 
-    researcher.invoke({"messages": [HumanMessage("...")]})
+    graph = researcher.compile()
+    graph.invoke({"messages": [HumanMessage("...")]})
 """
 
 from langchain_skillkit.node import node

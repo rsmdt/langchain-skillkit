@@ -13,8 +13,9 @@ Usage::
             response = await llm.ainvoke(state["messages"])
             return {"messages": [response], "sender": "researcher"}
 
-``researcher`` is a ``CompiledStateGraph`` — use it standalone or as
-a node in a larger graph.
+``researcher`` is a ``StateGraph`` — call ``.compile()`` to get a
+runnable graph, optionally passing a checkpointer for ``interrupt()``
+support.
 """
 
 from __future__ import annotations
@@ -36,10 +37,13 @@ if TYPE_CHECKING:
 _INJECTABLE_PARAMS = frozenset({"llm", "tools", "runtime"})
 
 
-def _validate_handler_signature(handler: Any, class_name: str) -> set[str]:
-    """Validate and extract injectable parameter names from handler.
+def _validate_handler_signature(handler: Any, class_name: str) -> tuple[set[str], type]:
+    """Validate handler signature, extract injectables and state type.
 
-    Returns the set of keyword-only parameter names that need injection.
+    Returns a tuple of (injectable_params, state_type).
+
+    The state type is inferred from the handler's first parameter annotation.
+    If no annotation is present, defaults to ``AgentState``.
 
     Raises:
         ValueError: If handler has invalid parameters.
@@ -62,6 +66,11 @@ def _validate_handler_signature(handler: Any, class_name: str) -> set[str]:
             f"class {class_name}(node): handler's first parameter must be "
             f"positional ('state'), got {first.kind.name}"
         )
+
+    # Extract state type from annotation, default to AgentState
+    state_type: type = AgentState
+    if first.annotation is not inspect.Parameter.empty:
+        state_type = first.annotation
 
     # Collect keyword-only params (after *)
     injectable = set()
@@ -86,7 +95,7 @@ def _validate_handler_signature(handler: Any, class_name: str) -> set[str]:
                 f"Signature should be: handler(state, *, {param.name}, ...)"
             )
 
-    return injectable
+    return injectable, state_type
 
 
 def _normalize_skills(
@@ -130,10 +139,13 @@ def _build_graph(
     user_tools: list[BaseTool],
     skill_kit: SkillKit | None,
     injectable: set[str],
+    state_type: type = AgentState,
 ) -> Any:
-    """Build and compile the ReAct subgraph.
+    """Build the ReAct subgraph.
 
-    Returns a CompiledStateGraph.
+    Returns an uncompiled ``StateGraph``. Call ``.compile()`` on the
+    result to get a runnable graph, optionally passing a checkpointer
+    for ``interrupt()`` support.
     """
     # Build complete tool list
     skill_tools: list[BaseTool] = []
@@ -158,7 +170,7 @@ def _build_graph(
     _agent_node.__qualname__ = f"node.<locals>.{node_name}"
 
     # Build the graph
-    workflow: StateGraph[Any] = StateGraph(AgentState)
+    workflow: StateGraph[Any] = StateGraph(state_type)
     workflow.add_node(node_name, _agent_node)  # type: ignore[type-var]
 
     if all_tools:
@@ -182,20 +194,21 @@ def _build_graph(
         workflow.set_entry_point(node_name)
         workflow.add_edge(node_name, END)
 
-    return workflow.compile()
+    return workflow
 
 
 class _NodeMeta(type):
-    """Metaclass that intercepts class body and returns a CompiledStateGraph.
+    """Metaclass that intercepts class body and returns a StateGraph.
 
     When a class inherits from ``node``, this metaclass:
 
     1. Extracts ``llm``, ``tools``, ``skills``, ``handler`` from the class body.
-    2. Validates the handler signature.
-    3. Builds and returns a ``CompiledStateGraph`` with the ReAct loop.
+    2. Validates the handler signature and infers state type from annotation.
+    3. Builds and returns an uncompiled ``StateGraph`` with the ReAct loop.
 
-    The result is NOT a class — it's a compiled graph, usable as a
-    standalone graph or as a node in a parent LangGraph graph.
+    The result is NOT a class — it's a ``StateGraph``. Call ``.compile()``
+    to get a runnable graph, optionally passing a checkpointer for
+    ``interrupt()`` support.
     """
 
     def __new__(
@@ -208,7 +221,7 @@ class _NodeMeta(type):
         if not bases:
             return super().__new__(mcs, name, bases, namespace)
 
-        # Subclass of node → intercept and return CompiledStateGraph
+        # Subclass of node → intercept and return StateGraph
 
         # Extract handler (required)
         handler = namespace.get("handler")
@@ -219,8 +232,8 @@ class _NodeMeta(type):
                 f"class {name}(node): handler must be callable, got {type(handler).__name__}"
             )
 
-        # Validate handler signature
-        injectable = _validate_handler_signature(handler, name)
+        # Validate handler signature and extract state type
+        injectable, state_type = _validate_handler_signature(handler, name)
 
         # Extract class attributes
         llm = namespace.get("llm")
@@ -246,14 +259,16 @@ class _NodeMeta(type):
             user_tools=list(user_tools),
             skill_kit=skill_kit,
             injectable=injectable,
+            state_type=state_type,
         )
 
 
 class node(metaclass=_NodeMeta):  # noqa: N801
     """Base class for skill-aware LangGraph agent nodes.
 
-    Declare a subclass to create a ``CompiledStateGraph`` with an
-    automatic ReAct loop (handler ⇄ ToolNode).
+    Declare a subclass to create a ``StateGraph`` with an automatic
+    ReAct loop (handler ⇄ ToolNode). Call ``.compile()`` on the result
+    to get a runnable graph.
 
     Example::
 
@@ -268,11 +283,16 @@ class node(metaclass=_NodeMeta):  # noqa: N801
                 response = await llm.ainvoke(state["messages"])
                 return {"messages": [response], "sender": "researcher"}
 
-        # Use standalone
-        researcher.invoke({"messages": [HumanMessage("...")]})
+        # Compile and use standalone
+        graph = researcher.compile()
+        graph.invoke({"messages": [HumanMessage("...")]})
 
-        # Use as node in a larger graph
-        workflow.add_node("researcher", researcher)
+        # Compile with checkpointer for interrupt() support
+        from langgraph.checkpoint.memory import InMemorySaver
+        graph = researcher.compile(checkpointer=InMemorySaver())
+
+        # Use as subgraph in a parent graph
+        workflow.add_node("researcher", researcher.compile())
 
     Class attributes:
 
@@ -286,4 +306,18 @@ class node(metaclass=_NodeMeta):  # noqa: N801
 
     ``state`` is positional. Everything after ``*`` is keyword-only and
     injected by name — declare only what you need, in any order.
+
+    Annotate ``state`` to use a custom state type::
+
+        class MyState(TypedDict, total=False):
+            messages: Annotated[list, add_messages]
+            draft: dict | None
+
+        class my_agent(node):
+            llm = ChatOpenAI(model="gpt-4o")
+
+            async def handler(state: MyState, *, llm):
+                ...
+
+    Without an annotation, ``AgentState`` is used by default.
     """

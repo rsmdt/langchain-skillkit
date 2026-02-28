@@ -1,3 +1,4 @@
+# ruff: noqa: N801, N805
 """Multi-agent graph — compose multiple node subclasses.
 
 Each node metaclass produces a self-contained ReAct subgraph with its own
@@ -52,8 +53,8 @@ class analyst(node):
 
 # Compose in a parent graph
 workflow = StateGraph(AgentState)
-workflow.add_node("researcher", researcher)
-workflow.add_node("analyst", analyst)
+workflow.add_node("researcher", researcher.compile())
+workflow.add_node("analyst", analyst.compile())
 
 workflow.add_edge(START, "researcher")
 workflow.add_edge("researcher", "analyst")

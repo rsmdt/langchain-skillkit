@@ -2,16 +2,19 @@
 """Tests for the node metaclass."""
 
 from pathlib import Path
+from typing import Annotated, Any, TypedDict
 from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.graph.message import add_messages
 
 from langchain_skillkit.node import (
     _normalize_skills,
     _validate_handler_signature,
 )
 from langchain_skillkit.skill_kit import SkillKit
+from langchain_skillkit.state import AgentState
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -21,23 +24,25 @@ class TestValidateHandlerSignature:
         def handler(state):
             pass
 
-        injectable = _validate_handler_signature(handler, "test")
+        injectable, state_type = _validate_handler_signature(handler, "test")
 
         assert injectable == set()
+        assert state_type is AgentState
 
     def test_accepts_state_with_llm(self):
         def handler(state, *, llm):
             pass
 
-        injectable = _validate_handler_signature(handler, "test")
+        injectable, state_type = _validate_handler_signature(handler, "test")
 
         assert injectable == {"llm"}
+        assert state_type is AgentState
 
     def test_accepts_all_injectables(self):
         def handler(state, *, llm, tools, runtime):
             pass
 
-        injectable = _validate_handler_signature(handler, "test")
+        injectable, state_type = _validate_handler_signature(handler, "test")
 
         assert injectable == {"llm", "tools", "runtime"}
 
@@ -66,9 +71,30 @@ class TestValidateHandlerSignature:
         def handler(state, *, llm, **kwargs):
             pass
 
-        injectable = _validate_handler_signature(handler, "test")
+        injectable, state_type = _validate_handler_signature(handler, "test")
 
         assert injectable == {"llm"}
+
+    def test_extracts_state_type_from_annotation(self):
+        class CustomState(TypedDict, total=False):
+            messages: Annotated[list[Any], add_messages]
+            draft: dict | None
+
+        def handler(state: CustomState, *, llm):
+            pass
+
+        injectable, state_type = _validate_handler_signature(handler, "test")
+
+        assert injectable == {"llm"}
+        assert state_type is CustomState
+
+    def test_defaults_to_agent_state_without_annotation(self):
+        def handler(state, *, llm):
+            pass
+
+        _, state_type = _validate_handler_signature(handler, "test")
+
+        assert state_type is AgentState
 
 
 class TestNormalizeSkills:
@@ -98,7 +124,9 @@ class TestNormalizeSkills:
 
 
 class TestNodeMetaclass:
-    def test_creates_compiled_graph(self):
+    def test_returns_uncompiled_state_graph(self):
+        from langgraph.graph import StateGraph
+
         from langchain_skillkit import node
 
         mock_llm = MagicMock()
@@ -114,9 +142,10 @@ class TestNodeMetaclass:
                     "sender": "test_agent",
                 }
 
-        # The metaclass returns a CompiledStateGraph, not a class
-        assert hasattr(test_agent, "invoke")
-        assert hasattr(test_agent, "ainvoke")
+        # The metaclass returns a StateGraph, not a CompiledStateGraph
+        assert isinstance(test_agent, StateGraph)
+        assert hasattr(test_agent, "compile")
+        assert not hasattr(test_agent, "invoke")
 
     def test_requires_handler(self):
         from langchain_skillkit import node
@@ -157,6 +186,8 @@ class TestNodeMetaclass:
                     return {"messages": [], "sender": "bad"}
 
     def test_node_with_skills(self):
+        from langgraph.graph import StateGraph
+
         from langchain_skillkit import node
 
         mock_llm = MagicMock()
@@ -172,7 +203,55 @@ class TestNodeMetaclass:
                     "sender": "skilled_agent",
                 }
 
-        assert hasattr(skilled_agent, "invoke")
+        assert isinstance(skilled_agent, StateGraph)
+
+    @pytest.mark.asyncio
+    async def test_custom_state_type_from_handler_annotation(self):
+        from langchain_skillkit import node
+
+        class WorkflowState(TypedDict, total=False):
+            messages: Annotated[list[Any], add_messages]
+            draft: dict | None
+
+        mock_llm = MagicMock()
+
+        class custom_agent(node):
+            llm = mock_llm
+
+            async def handler(state: WorkflowState, *, llm):
+                return {"messages": [AIMessage(content="custom")]}
+
+        # The StateGraph should use WorkflowState, not AgentState
+        compiled = custom_agent.compile()
+        result = await compiled.ainvoke(
+            {
+                "messages": [HumanMessage(content="hi")],
+                "draft": {"section": "content"},
+            }
+        )
+
+        # Custom state fields survive graph execution
+        assert result["draft"] == {"section": "content"}
+
+    @pytest.mark.asyncio
+    async def test_default_state_type_without_annotation(self):
+        from langchain_skillkit import node
+
+        mock_llm = MagicMock()
+
+        class default_agent(node):
+            llm = mock_llm
+
+            async def handler(state, *, llm):
+                return {"messages": [AIMessage(content="default")]}
+
+        # Should compile and work with AgentState (default)
+        compiled = default_agent.compile()
+        result = await compiled.ainvoke(
+            {"messages": [HumanMessage(content="hi")]}
+        )
+
+        assert result["messages"][-1].content == "default"
 
 
 class TestNodeInvocation:
@@ -191,7 +270,8 @@ class TestNodeInvocation:
                     "sender": "simple",
                 }
 
-        result = await simple.ainvoke(
+        compiled = simple.compile()
+        result = await compiled.ainvoke(
             {
                 "messages": [HumanMessage(content="hi")],
             }

@@ -1,6 +1,6 @@
 [project]
 name = "langchain-skillkit"
-version = "0.2.0"
+version = "0.3.0"
 description = "Skill-driven agent toolkit for LangGraph with semantic skill discovery"
 readme = "README.md"
 requires-python = ">=3.11"

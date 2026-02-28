@@ -54,8 +54,8 @@ def web_search(query: str) -> str:
     return f"Results for: {query}"
 
 # --- Declare an agent ---
-# Subclassing `node` produces a CompiledStateGraph, not a class.
-# The agent gets Skill and SkillRead tools automatically from the skills directory.
+# Subclassing `node` produces a StateGraph, not a class.
+# Call .compile() to get a runnable graph.
 
 class researcher(node):
     llm = ChatOpenAI(model="gpt-4o")
@@ -66,14 +66,15 @@ class researcher(node):
         response = await llm.ainvoke(state["messages"])
         return {"messages": [response], "sender": "researcher"}
 
-# --- Use standalone ---
+# --- Compile and use standalone ---
 
-result = researcher.invoke({"messages": [HumanMessage("Size the B2B SaaS market")]})
+graph = researcher.compile()
+result = graph.invoke({"messages": [HumanMessage("Size the B2B SaaS market")]})
 
 # --- Or compose into a parent graph ---
 
 workflow = StateGraph(AgentState)
-workflow.add_node("researcher", researcher)
+workflow.add_node("researcher", researcher.compile())
 workflow.add_edge(START, "researcher")
 workflow.add_edge("researcher", END)
 graph = workflow.compile()
@@ -83,9 +84,12 @@ graph = workflow.compile()
 
 See [`examples/`](examples/) for complete working code:
 
-- **[`standalone_node.py`](examples/standalone_node.py)** — Simplest usage: declare a node class, invoke it
+- **[`standalone_node.py`](examples/standalone_node.py)** — Simplest usage: declare a node class, compile, invoke
 - **[`manual_wiring.py`](examples/manual_wiring.py)** — Use `SkillKit` as a standalone toolkit with full graph control
 - **[`multi_agent.py`](examples/multi_agent.py)** — Compose multiple agents in a parent graph
+- **[`root_with_checkpointer.py`](examples/root_with_checkpointer.py)** — Multi-turn conversations with `interrupt()` and `Command(resume=...)`
+- **[`subgraph_with_checkpointer.py`](examples/subgraph_with_checkpointer.py)** — Subgraph inherits parent's checkpointer automatically
+- **[`custom_state_type.py`](examples/custom_state_type.py)** — Custom state shape via handler annotation + subgraph schema translation
 
 ## API Reference
 
@@ -111,7 +115,7 @@ all_tools = [web_search] + kit.tools  # [web_search, Skill, SkillRead]
 
 ### `node`
 
-Declarative agent builder. Subclassing produces a `CompiledStateGraph`.
+Declarative agent builder. Subclassing produces a `StateGraph`. Call `.compile()` to get a runnable graph.
 
 ```python
 from langchain_skillkit import node
@@ -125,7 +129,16 @@ class my_agent(node):
         response = await llm.ainvoke(state["messages"])
         return {"messages": [response], "sender": "my_agent"}
 
-my_agent.invoke({"messages": [HumanMessage("...")]})
+graph = my_agent.compile()
+graph.invoke({"messages": [HumanMessage("...")]})
+```
+
+**Compile with a checkpointer** for `interrupt()` support:
+
+```python
+from langgraph.checkpoint.memory import InMemorySaver
+
+graph = my_agent.compile(checkpointer=InMemorySaver())
 ```
 
 **Class attributes:**
@@ -150,6 +163,26 @@ async def handler(state, *, llm, tools, runtime): ...
 | `llm` | `BaseChatModel` | LLM pre-bound with all tools via `bind_tools()` |
 | `tools` | `list[BaseTool]` | All tools available to the agent |
 | `runtime` | `Any` | LangGraph runtime context (passed through from config) |
+
+**Custom state types** — annotate the handler's `state` parameter:
+
+```python
+from typing import Annotated, TypedDict
+from langgraph.graph.message import add_messages
+
+class WorkflowState(TypedDict, total=False):
+    messages: Annotated[list, add_messages]
+    draft: dict | None
+
+class my_agent(node):
+    llm = ChatOpenAI(model="gpt-4o")
+
+    async def handler(state: WorkflowState, *, llm):
+        response = await llm.ainvoke(state["messages"])
+        return {"messages": [response]}
+```
+
+Without an annotation, `AgentState` is used by default.
 
 ### `AgentState`
 
