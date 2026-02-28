@@ -247,9 +247,7 @@ class TestNodeMetaclass:
 
         # Should compile and work with AgentState (default)
         compiled = default_agent.compile()
-        result = await compiled.ainvoke(
-            {"messages": [HumanMessage(content="hi")]}
-        )
+        result = await compiled.ainvoke({"messages": [HumanMessage(content="hi")]})
 
         assert result["messages"][-1].content == "default"
 
